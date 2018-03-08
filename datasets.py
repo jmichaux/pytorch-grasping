@@ -21,27 +21,27 @@ class CornellGraspingDataset(Dataset):
         self.height = 480
         self.width = 640
         # number of bounding box points
-        self.nbox_pts
+        self.nbox_pts = 4
         
     def __len__(self):
         return len(self.df)
         
     def __getitem__(self, index):
         # Get filenames
-        data_subdir = os.path.join(self.root_dir, 
+        data_subdir = join(self.root_dir, 
+                                   str(self.df.iloc[index, 0]))
+        
+        img_name = join(self.root_dir, 
+                                   data_subdir,
                                    self.df.iloc[index, 1])
         
-        img_name = os.path.join(self.root_dir, 
+        pcd_name = join(self.root_dir, 
                                    data_subdir,
                                    self.df.iloc[index, 2])
         
-        depth_name = os.path.join(self.root_dir, 
+        pos_name = join(self.root_dir, 
                                    data_subdir,
                                    self.df.iloc[index, 3])
-        
-        pos_name = os.path.join(self.root_dir, 
-                                   data_subdir,
-                                   self.df.iloc[index, 4])
         
         # open image
         img = Image.open(img_name)
@@ -57,7 +57,7 @@ class CornellGraspingDataset(Dataset):
             # convert pcd to array
             # row = np.floor(index / 640) 
             # col = np.mod(index, 640) 
-            pcd = np.zeros((self.height, self.width))
+            pcd = np.zeros((self.height * self.width))
             pcd[_pcd[:, 0].astype(int)] = _pcd[:, 1]
             pcd = np.reshape(pcd, (-1, self.width))
             
@@ -66,10 +66,10 @@ class CornellGraspingDataset(Dataset):
             img[:, :, 2] = pcd_array
             
         # open target
-        _targets = np.load_text(pos_name)
+        _targets = np.loadtxt(pos_name)
         num_grasps = int(len(_targets) / 2)
         idx = random.randint(0, (num_grasps - 1))
-        target = target[self.nbox_pts * idx : nbox_pts * (idx + 1)]
+        target = _targets[self.nbox_pts * idx : self.nbox_pts * (idx + 1)]
         
         # transform
         if self.transform:
