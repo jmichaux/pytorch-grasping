@@ -12,7 +12,7 @@ from scipy.misc import bytescale
 
 
 class CornellGraspingDataset(Dataset):
-    def __init__(self, csv_file, root_dir, use_depth=True, shuffle_channels=True, transform=None):
+    def __init__(self, csv_file, root_dir, use_depth=True, shuffle_channels=True, sixd_grasp=True, transform=None):
         self.df = pd.read_csv(csv_file)
         self.root_dir = root_dir
         self.transform = transform
@@ -23,6 +23,7 @@ class CornellGraspingDataset(Dataset):
         self.width = 640
         # number of bounding box points
         self.nbox_pts = 4
+        self.sixd_grasp = sixd_grasp
         
     def __len__(self):
         return len(self.df)
@@ -78,5 +79,25 @@ class CornellGraspingDataset(Dataset):
         # transform
         if self.transform:
             img, target = self.transform(img, target)
-            
+            img = self.transform(img)
+        
+        # original target has [col, row] cartesion coordinates
+        # transformed target has [row, col] numpy array coordinates
+        y1, x1 = target[0]
+        y2, x2 = target[1]
+        y3, x3 = target[2]
+        y4, x4 = target[3]
+        
+        # calculate x, y, h, w, theta of bounding box
+        x = (x1 + x3) / 2
+        y = (y1 + y3) / 2
+        h = np.sqrt((x1 - x2)**2 + (y1 - y2)**2)
+        w = np.sqrt((x1 - x4)**2 + (y1 - y4)**2)
+        theta = np.arctan((y1 - y2) / (x1 - x2))
+        
+        if self.sixd_grasp:
+            target = np.array([x, y, h, w, np.cos(2*theta), np.sin(2*theta)])
+        else:
+            target = np.array([x, y, h, w, theta])
+
         return img, target
