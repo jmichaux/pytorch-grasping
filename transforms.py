@@ -23,6 +23,30 @@ class Compose(object):
             img, target = t(img,target)
         return img, target
 
+    
+class RandomTranslate(object):
+    def __init__(self, translation):
+        if isinstance(translation, numbers.Number):
+            self.translation = (int(translation), int(translation))
+        else:
+            self.translation = translation
+
+    def __call__(self, img, target):
+        h, w, c = img.shape
+        th, tw = self.translation
+        tw = random.randint(-tw, tw)
+        th = random.randint(-th, th)
+        if tw == 0 and th == 0:
+            return img, target
+
+        x1, x2, x3, x4 = max(0, -th), min(h - th, h), max(0, th), min(h + th, h)
+        y1, y2, y3, y4 = max(0, -tw), min(w - tw, w), max(0, tw), min(w + tw, w)
+        img[x3:x4, y3:y4, :] = img[x1:x2, y1:y2, :]
+        
+        target = target + np.array([[th, tw]])
+        return img, target
+
+
 class CenterCrop(object):
     '''Crops image at center'''
     def __init__(self, size=320):
@@ -34,15 +58,16 @@ class CenterCrop(object):
     def __call__(self, img, target):
         h1, w1, _ = img.shape
         th, tw = self.size
-
+        
         # note that we are indexing images as numpy arrays
         x1 = int(round((h1 - th) / 2.))
         y1 = int(round((w1 - tw) / 2.))
-
-        img = img[x1: x1 + th, y1: y1 + tw, :]
-
+        
+        img = img[x1: x1 + th, y1: y1 + tw, :] 
+        
         target = target - np.array([[x1, y1]])
-        return img, target
+        return img, target        
+
 
 class Rescale(object):
     """Rescale the image in a sample to a given size.
@@ -58,7 +83,7 @@ class Rescale(object):
         self.output_size = output_size
 
     def __call__(self, img, target):
-
+       
         h, w = img.shape[:2]
         if isinstance(self.output_size, int):
             if h > w:
@@ -76,6 +101,31 @@ class Rescale(object):
         target /= ratio
         return img, target
 
+    
+class RandomVerticalFlip(object):
+    """Randomly horizontally flips the given PIL.Image with a probability of 0.5
+    """
+
+    def __call__(self, img, target):
+        h, _, _ = im.shape
+        if random.random() < 0.5:
+            img = np.copy(np.flipud(img))
+            target[:, 0] = h - np.copy(target[:, 0])
+        return img, target
+    
+    
+class RandomHorizontalFlip(object):
+    """Randomly horizontally flips the given PIL.Image with a probability of 0.5
+    """
+
+    def __call__(self, img, target):
+        _, w, _ = im.shape
+        if random.random() < 0.5:
+            img = np.copy(np.fliplr(img))
+            target[:, 1] = w - np.copy(target[:, 1])
+        return img, target
+
+    
 class ToTensor(object):
     """Convert ndarrays in sample to Tensors."""
     def __init__(self):
