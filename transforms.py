@@ -10,6 +10,7 @@ from scipy.misc import bytescale
 from torch.utils.data.dataset import Dataset
 from torch.utils.data import DataLoader
 from torchvision import transforms, utils
+from torchvision.transforms import ToTensor
 
 class Compose(object):
     """ Composes several co_transforms together.
@@ -129,11 +130,11 @@ class RandomHorizontalFlip(object):
 class ToTensor(object):
     """Convert ndarrays in sample to Tensors."""
     def __init__(self):
-        pass
+        self.to_tensor = ToTensor()
 
     def __call__(self, img, target):
         # swap color axis because
         # numpy image: H x W x C
         # torch image: C X H X W
         # image = image.transpose((2, 0, 1))
-        return torch.from_numpy(img), torch.from_numpy(target)
+        return to_tensor(img), torch.from_numpy(target)
