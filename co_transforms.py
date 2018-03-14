@@ -1,20 +1,10 @@
 import random
-from os.path import basename, dirname, join
-import glob
 import numbers
 import numpy as np
-import pandas as pd
 
 from PIL import Image
-import matplotlib.pyplot as plt
 from scipy.misc import bytescale
 
-import torch
-from torch.utils.data.dataset import Dataset
-from torch.utils.data import DataLoader
-import torchvision
-from torchvision import models, utils
-import torchvision.transforms as t
 from torchvision.transforms import functional as f
 
 
