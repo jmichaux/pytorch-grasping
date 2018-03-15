@@ -34,12 +34,23 @@ class RandomTranslation(object):
             self.translation = translation
     
     @staticmethod
-    def get_params(translation, img_size):
+    def get_params(translation, img_size, bbox):
         if translation is not None:
-            max_dx = translation[0] #* img_size[0]
-            max_dy = translation[1] #* img_size[1]
-            translations = (np.round(random.uniform(-max_dx, max_dx)),
-                            np.round(random.uniform(-max_dy, max_dy)))
+            min_x, max_x, min_y, max_y = min(bbox[:,0]), max(bbox[:,0]), min(bbox[:,1]), max(bbox[:,1])
+            
+            # added 20-30 pixel buffer to allowable translations
+            max_dx = min(450 - max_x, translation[0])
+            min_dx = max(-(min_x - 180), -translation[0])
+            
+            max_dy = min(370 - max_y, translation[1])
+            min_dy = max(-(min_y - 100), -translation[1])
+            
+            translations = (np.round(random.uniform(min_dx, max_dx)),
+                            np.round(random.uniform(min_dy, max_dy)))
+#             max_dx = translation[0] #* img_size[0]
+#             max_dy = translation[1] #* img_size[1]
+#             translations = (np.round(random.uniform(-max_dx, max_dx)),
+#                             np.round(random.uniform(-max_dy, max_dy)))
         else:
             translations = (0, 0)
         return translations
@@ -49,7 +60,7 @@ class RandomTranslation(object):
         return img.transform(img.size, Image.AFFINE, (1, 0, -translation[0], 0,  1, -translation[1]))
             
     def __call__(self, img, bbox, pcd=None):
-        translation = self.get_params(self.translation, img.size)
+        translation = self.get_params(self.translation, img.size, bbox)
         img = self.translate(img, translation)
         bbox = bbox + np.array([[translation[0], translation[1]]]) 
         
