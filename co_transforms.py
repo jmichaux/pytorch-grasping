@@ -193,17 +193,6 @@ class RandomHorizontalFlip(object):
         return img, bbox, pcd
 
 
-class PCDtoRGB(object):
-    """
-    Convert single-channel PCD PIL image to three-channel RGB-like image
-    """
-    def __call__(self, img, bbox, pcd):
-        _pcd = pcd
-        pcd = Image.new("RGB", _pcd.size)
-        pcd.paste(_pcd)
-        return img, bbox, pcd
-
-
 class ToTensor(object):
     """
     Convert PIL image and bounding box to Tensor objects.
