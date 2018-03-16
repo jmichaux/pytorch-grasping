@@ -3,7 +3,6 @@ import numbers
 import numpy as np
 
 from PIL import Image
-from scipy.misc import bytescale
 
 from torchvision.transforms import functional as f
 

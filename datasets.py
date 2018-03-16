@@ -8,12 +8,7 @@ import pandas as pd
 from PIL import Image
 from scipy.misc import bytescale
 
-import torch
 from torch.utils.data.dataset import Dataset
-from torch.utils.data import DataLoader
-import torchvision
-from torchvision import models, utils
-import torchvision.transforms as t
 from torchvision.transforms import functional as f
 
 
