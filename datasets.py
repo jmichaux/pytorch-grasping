@@ -15,20 +15,33 @@ from torchvision.transforms import functional as f
 
 class CornellGraspingDataset(Dataset):
     def __init__(self, csv_file, root_dir,
-                 use_depth=False,
-                 concat_depth=False,
-                 grasp_config=5,
-                 transform=None,
-                 co_transform=None):
+                 img_height = 480,
+                 img_width = 640,
+                 img_channels = 2,
+                 nbox_pts = 4,
+                 use_pcd=False,
+                 concat_pcd=False,
+                 pre_img_transform=None,
+                 pre_pcd_transform=None,
+                 co_transform=None,
+                 post_img_transform=None,
+                 post_pcd_transform=None,
+                 target_transform=None,
+                 grasp_config=5,):
         self.df = pd.read_csv(csv_file)
         self.root_dir = root_dir
-        self.transform = transform
+        self.pre_img_transform = pre_img_transform
+        self.pre_pcd_transform = pre_pcd_transform
         self.co_transform = co_transform
-        self.use_depth = use_depth
-        self.concat_depth = concat_depth
-        self.im_height = 480
-        self.im_width = 640
-        self.nbox_pts = 4
+        self.post_img_transform = post_img_transform
+        self.post_pcd_transform = post_pcd_transform
+        self.target_transform=target_transform
+        self.use_pcd = use_pcd
+        self.concat_pcd = concat_pcd
+        self.img_channels = img_channels
+        self.img_height = img_height
+        self.img_width = img_width
+        self.nbox_pts = nbox_pts
         self.grasp_config = grasp_config
 
     def __len__(self):
@@ -54,23 +67,19 @@ class CornellGraspingDataset(Dataset):
         # open image
         img = Image.open(img_name)
 
-        # image-only transform
-        if self.transform:
-            img = self.transform(img)
-
-        # open depth map (TODO: speed this part up)
-        if self.use_depth:
+        # open point cloud data map (TODO: speed this part up)
+        if self.use_pcd:
             _pcd = np.loadtxt(pcd_name, skiprows=10, usecols=(4, 2))
 
-            # normalize pcd_data (TODO: replace bytescale)
+            # normalize pcd (TODO: replace bytescale)
             _pcd[:, 1] = bytescale(_pcd[:, 1])
 
             # convert pcd to array
             # row = np.floor(index / 640)
             # col = np.mod(index, 640)
-            pcd = np.zeros((self.im_height * self.im_width))
+            pcd = np.zeros((self.img_height * self.img_width))
             pcd[_pcd[:, 0].astype(int)] = _pcd[:, 1]
-            pcd = np.reshape(pcd, (-1, self.width))
+            pcd = np.reshape(pcd, (-1, self.img_width))
             pcd = Image.fromarray(pcd.astype("uint8"))
         else:
             pcd = None
@@ -81,14 +90,32 @@ class CornellGraspingDataset(Dataset):
         idx = random.randint(0, (num_grasps - 1))
         bbox = pos[self.nbox_pts * idx : self.nbox_pts * (idx + 1)]
 
-        # co_transforms
+        # pre-transform img
+        if self.pre_img_transform:
+            img = self.pre_img_transform(img)
+
+        # pre-transform pcd
+        if pcd is not None:
+            if self.pre_pcd_transform:
+                pcd = self.pre_pcd_transform(pcd)
+
+        # co-transform img and pcd
         if self.co_transform:
             img, bbox, pcd = self.co_transform(img, bbox, pcd)
 
-        # img and pcd
-        if self.use_depth:
-            if self.concat_depth:
-                if self.num_channels == 3:
+        # post-transform img
+        if self.post_img_transform:
+            img = self.post_img_transform(img)
+        
+        # post-transform pcd
+        if pcd is not None:
+            if self.post_pcd_transform:
+                pcd = self.post_pcd_transform(pcd)
+
+        # concatenate img and pcd
+        if self.use_pcd:
+            if self.concat_pcd:
+                if self.img_channels == 3:
                     img = torch.cat((img, pcd), 0)
                 else:
                     img = torch.cat((img[:2, :, :], pcd), 0)
@@ -119,4 +146,7 @@ class CornellGraspingDataset(Dataset):
         else:
             target = np.array([x, y, box_h, box_w, np.cos(2*theta), np.sin(2*theta)])
 
+        if self.target_transform:
+            target = self.target_transform(target)
+            
         return img, target, bbox, pcd
