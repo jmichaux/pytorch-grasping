@@ -47,10 +47,6 @@ class RandomTranslation(object):
 
             translations = (np.round(random.uniform(min_dx, max_dx)),
                             np.round(random.uniform(min_dy, max_dy)))
-#             max_dx = translation[0] #* img_size[0]
-#             max_dy = translation[1] #* img_size[1]
-#             translations = (np.round(random.uniform(-max_dx, max_dx)),
-#                             np.round(random.uniform(-max_dy, max_dy)))
         else:
             translations = (0, 0)
         return translations
@@ -197,6 +193,7 @@ class RandomHorizontalFlip(object):
                 pcd = f.hflip(pcd)
         return img, bbox, pcd
 
+
 class PCDtoRGB(object):
     """
     Convert single-channel PCD PIL image to three-channel RGB-like image
@@ -206,6 +203,7 @@ class PCDtoRGB(object):
         pcd = Image.new("RGB", _pcd.size)
         pcd.paste(_pcd)
         return img, bbox, pcd
+
 
 class ToTensor(object):
     """
