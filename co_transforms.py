@@ -22,7 +22,7 @@ class Compose(object):
 
 class RandomTranslation(object):
     """
-    https://stackoverflow.com/questions/37584977/translate-image-using-pil
+    
     """
     def __init__(self, translation=None):
         if isinstance(translation, numbers.Number):
