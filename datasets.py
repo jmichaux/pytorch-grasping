@@ -15,32 +15,44 @@ from torchvision.transforms import functional as f
 
 class CornellGraspingDataset(Dataset):
     def __init__(self, csv_file, root_dir,
-                 img_height = 480,
-                 img_width = 640,
-                 img_channels = 2,
+                 im_height = 480,
+                 im_width = 640,
+                 num_channels = 2,
                  nbox_pts = 4,
                  use_pcd=False,
                  concat_pcd=False,
+                 fold=0,
+                 split=None,
+                 split_type=None,
                  pre_img_transform=None,
                  pre_pcd_transform=None,
                  co_transform=None,
                  post_img_transform=None,
                  post_pcd_transform=None,
                  target_transform=None,
-                 grasp_config=5,):
+                 grasp_config=5):
+        
         self.df = pd.read_csv(csv_file)
         self.root_dir = root_dir
+        splits = {'image': 'Image-wise', 'object': 'Object-wise'}
+        if split == 'train':
+            self.df = self.df[self.df[splits[split_type]] != fold]
+        if split == 'val':
+            self.df = self.df[self.df[splits[split_type]] == fold]
+                    
+        self.im_height = im_height
+        self.im_width = im_width
+        self.num_channels = num_channels
+        self.use_pcd = use_pcd
+        self.concat_pcd = concat_pcd
+            
         self.pre_img_transform = pre_img_transform
         self.pre_pcd_transform = pre_pcd_transform
         self.co_transform = co_transform
         self.post_img_transform = post_img_transform
         self.post_pcd_transform = post_pcd_transform
         self.target_transform=target_transform
-        self.use_pcd = use_pcd
-        self.concat_pcd = concat_pcd
-        self.img_channels = img_channels
-        self.img_height = img_height
-        self.img_width = img_width
+        
         self.nbox_pts = nbox_pts
         self.grasp_config = grasp_config
 
@@ -67,22 +79,22 @@ class CornellGraspingDataset(Dataset):
         # open image
         img = Image.open(img_name)
 
-        # open point cloud data map (TODO: speed this part up)
+        # open point cloud data map
         if self.use_pcd:
-            _pcd = np.loadtxt(pcd_name, skiprows=10, usecols=(4, 2))
-
+            _pcd = np.array(pd.read_csv(pcd_name, sep=" ", skiprows=10, usecols=[4,2], header=None))
+            
             # normalize pcd (TODO: replace bytescale)
-            _pcd[:, 1] = bytescale(_pcd[:, 1])
+            _pcd[:, 0] = bytescale(_pcd[:, 0])
 
             # convert pcd to array
             # row = np.floor(index / 640)
             # col = np.mod(index, 640)
-            pcd = np.zeros((self.img_height * self.img_width))
-            pcd[_pcd[:, 0].astype(int)] = _pcd[:, 1]
-            pcd = np.reshape(pcd, (-1, self.img_width))
+            pcd = np.zeros((self.im_height * self.im_width))
+            pcd[_pcd[:, 1].astype(int)] = _pcd[:, 0]
+            pcd = np.reshape(pcd, (-1, self.im_width))
             pcd = Image.fromarray(pcd.astype("uint8"))
         else:
-            pcd = None
+            pcd = 0
 
         # load random bounding box
         pos = np.loadtxt(pos_name)
@@ -111,15 +123,16 @@ class CornellGraspingDataset(Dataset):
         if pcd is not None:
             if self.post_pcd_transform:
                 pcd = self.post_pcd_transform(pcd)
-
+                pcd = pcd[:1, :, :]
+                
         # concatenate img and pcd
         if self.use_pcd:
             if self.concat_pcd:
-                if self.img_channels == 3:
+                if self.num_channels == 3:
                     img = torch.cat((img, pcd), 0)
                 else:
                     img = torch.cat((img[:2, :, :], pcd), 0)
-                pcd = None
+                pcd = 0
 
         # calculate target
         # corners of bbox
