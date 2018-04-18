@@ -35,7 +35,7 @@ parser.add_argument('--csv', dest='csv_dir', metavar='CSV',
                     help='path to csv file')
 parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
                     help='number of data loading workers (default: 4)')
-parser.add_argument('--epochs', default=1000, type=int, metavar='N',
+parser.add_argument('--epochs', default=100000, type=int, metavar='N',
                     help='number of total epochs')
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful for restarts)')
@@ -57,12 +57,14 @@ parser.add_argument('--epoch-print-freq', '--ep', default=1, type=int,
                     metavar='N', help='print frequency for batches (default: 1)')
 parser.add_argument('--pretrained', dest='pretrained', action='store_true',
                     help='use pretrained model')
-parser.add_argument('--train-all', dest='train-all', action='store_true',
+parser.add_argument('--train-all', dest='train_all', action='store_false',
                     help='make entire network trainable')
 parser.add_argument('--grasp-config', default=5, type=int,
                     help='parameterizaton length of grasps')
 parser.add_argument('--num-folds', default=5, type=int,
                     help='number of cross-validation folds')
+# parser.add_argument('--verbose', '-v', dest='verbose', action='store_true',
+#                     help='print during training')
 
 
 ######################
@@ -184,15 +186,9 @@ def train(train_loader, model, criterion, optimizer, epoch):
 
         # measure elapsed time
         batch_time.update(time.time() - end)
-        end = time.time()
+        end = time.time()    
+    return losses.avg, acc.avg
 
-        print('Batch: {0}/{1}\t'
-              'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-              'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
-              'Accuracy {acc.val:.3f} ({acc.avg:.3f})'
-              'Loss {loss.val:.4f} ({loss.avg:.4f})\t'.format(
-                   i+1, len(train_loader)+1, batch_time=batch_time,
-                  data_time=data_time, loss=losses, acc=acc))
 
 
 def validate(val_loader, model, criterion):
@@ -217,65 +213,120 @@ def validate(val_loader, model, criterion):
         losses.update(loss.data[0], input.size(0))
         acc.update(accuracy(output.data, target.data), input.size(0))
 
+    return losses.avg, acc.avg
+
+
+def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
+    torch.save(state, filename)
+    if is_best:
+        shutil.copyfile(filename, 'model_best.pth.tar')
 
 def main():
 
     args = parser.parse_args()
-    print(args)
+    fold = 0
+    # for fold in range(args.num_folds):
+    # create dataset
 
-    for fold in range(args.num_folds):
-        print('Creating training and validation datasets for fold {}.'.format(fold))
-        train_data = CornellGraspingDataset(
+    train_data = CornellGraspingDataset(
+    csv_file=args.csv_dir, 
+    data_dir=args.data_dir,
+    fold=fold,
+    split='train',
+    split_type='image',
+    use_pcd=False,
+    concat_pcd=False,
+    pre_img_transform=None,
+    pre_pcd_transform=None,
+    co_transform=train_co_transform,
+    post_img_transform=post_img_transform,
+    post_pcd_transform=None,
+    target_transform=target_transform,
+    grasp_config=args.grasp_config,)
+
+
+    train_loader = DataLoader(train_data,
+                      batch_size=32,
+                      shuffle=True,
+                      num_workers=4,
+                      pin_memory=True)
+
+
+    val_data = CornellGraspingDataset(
         csv_file=args.csv_dir, 
         data_dir=args.data_dir,
         fold=fold,
-        split='train',
+        split='val',
         split_type='image',
         use_pcd=False,
         concat_pcd=False,
         pre_img_transform=None,
         pre_pcd_transform=None,
-        co_transform=train_co_transform,
+        co_transform=val_co_transform,
         post_img_transform=post_img_transform,
         post_pcd_transform=None,
         target_transform=target_transform,
         grasp_config=args.grasp_config,)
 
 
-        train_loader = DataLoader(train_data,
-                          batch_size=32,
-                          shuffle=True,
-                          num_workers=4,
-                          pin_memory=True)
+    val_loader = DataLoader(val_data,
+                      batch_size=32,
+                      shuffle=False,
+                      num_workers=4,
+                      pin_memory=True)
 
+    #Load model
+    model = torchvision.models.alexnet(pretrained=True)
 
-        val_data = CornellGraspingDataset(
-            csv_file=args.csv_dir, 
-            data_dir=args.data_dir,
-            fold=fold,
-            split='val',
-            split_type='image',
-            use_pcd=False,
-            concat_pcd=False,
-            pre_img_transform=None,
-            pre_pcd_transform=None,
-            co_transform=val_co_transform,
-            post_img_transform=post_img_transform,
-            post_pcd_transform=None,
-            target_transform=target_transform,
-            grasp_config=args.grasp_config,)
+    # If only training the last two layers
+    if not args.train_all:
+        for param in model.parameters():
+            param.requires_grad = False
 
+    # Replace last two linear layers
+    model.classifier._modules['4'] = nn.Linear(4096, 512)
+    model.classifier._modules['6'] = nn.Linear(512, args.grasp_config)
+    model.cuda()
 
-        val_loader = DataLoader(val_data,
-                          batch_size=32,
-                          shuffle=False,
-                          num_workers=4,
-                          pin_memory=True)
+    # Loss, optimizer, lr_scheduler
+    criterion = nn.MSELoss().cuda()
+    optimizer = optim.SGD(model.parameters(),
+                          lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
+    scheduler = lr_scheduler.StepLR(optimizer, step_size=700, gamma=0.1)
 
+    epoch_time = AverageMeter()
+    train_loss = AverageMeter()
+    train_acc = AverageMeter()
+    val_loss = AverageMeter()
+    val_acc = AverageMeter()
+    
+    start = time.time()
+    for epoch in range(args.start_epoch, args.epochs):
+        end = time.time()        
+        # one training step
+        t_loss, t_acc = train(train_loader, model, criterion, optimizer, epoch)
+        
+        # one validation step
+        v_loss, v_acc = validate(val_loader, model, criterion)
 
+        # update loss, accuracy, and epoch time
+        epoch_time.update(time.time() - end)
+        train_loss.update(t_loss, 1)
+        train_acc.update(t_acc, 1)
+        val_loss.update(v_loss, 1)
+        val_acc.update(v_acc, 1)
 
-        print('Finished creating datasets.')
+        print('Epoch: {0}/{1}\t'
+              'Time {time.val:.3f} ({time.avg:.3f})\t'
+              'Train Loss {t_loss.val:.4f} ({t_loss.avg:.4f})\t'
+              'Train Acc {t_acc.val:.3f} ({t_acc.avg:.3f})\t'
+              'Val Loss {v_loss.val:.4f} ({v_loss.avg:.4f})\t'
+              'Val Acc {v_acc.val:.3f} ({v_acc.avg:.3f})'.format(
+                                                                 epoch+1, args.epochs-args.start_epoch, time=epoch_time,
+                                                                 t_loss=train_loss, t_acc=train_acc,
+                                                                 v_loss=val_loss, v_acc=val_acc))
 
+    print("Training time: {}".format(time.time() - start))
 
 
 if __name__ == '__main__':
