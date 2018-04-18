@@ -8,13 +8,14 @@ import pandas as pd
 from PIL import Image
 from scipy.misc import bytescale
 
+import torch
 from torch.utils.data.dataset import Dataset
 from torchvision.transforms import functional as f
 
 
 
 class CornellGraspingDataset(Dataset):
-    def __init__(self, csv_file, root_dir,
+    def __init__(self, csv_file, data_dir,
                  im_height = 480,
                  im_width = 640,
                  num_channels = 2,
@@ -33,7 +34,7 @@ class CornellGraspingDataset(Dataset):
                  grasp_config=5):
         
         self.df = pd.read_csv(csv_file)
-        self.root_dir = root_dir
+        self.data_dir = data_dir
         splits = {'image': 'Image-wise', 'object': 'Object-wise'}
         if split == 'train':
             self.df = self.df[self.df[splits[split_type]] != fold]
@@ -61,18 +62,18 @@ class CornellGraspingDataset(Dataset):
 
     def __getitem__(self, index):
         # Get filenames
-        data_subdir = join(self.root_dir,
+        data_subdir = join(self.data_dir,
                                    str(self.df.iloc[index, 0]))
 
-        img_name = join(self.root_dir,
+        img_name = join(self.data_dir,
                                    data_subdir,
                                    self.df.iloc[index, 1])
 
-        pcd_name = join(self.root_dir,
+        pcd_name = join(self.data_dir,
                                    data_subdir,
                                    self.df.iloc[index, 2])
 
-        pos_name = join(self.root_dir,
+        pos_name = join(self.data_dir,
                                    data_subdir,
                                    self.df.iloc[index, 3])
 
@@ -94,13 +95,16 @@ class CornellGraspingDataset(Dataset):
             pcd = np.reshape(pcd, (-1, self.im_width))
             pcd = Image.fromarray(pcd.astype("uint8"))
         else:
-            pcd = 0
+            pcd = None
 
         # load random bounding box
         pos = np.loadtxt(pos_name)
         num_grasps = int(len(pos) / self.nbox_pts)
-        idx = random.randint(0, (num_grasps - 1))
-        bbox = pos[self.nbox_pts * idx : self.nbox_pts * (idx + 1)]
+        nan_grasp = True
+        while nan_grasp:
+            grasp_idx = random.randint(0, (num_grasps - 1))
+            bbox = pos[self.nbox_pts * grasp_idx : self.nbox_pts * (grasp_idx + 1)]
+            nan_grasp = np.isnan(bbox).any()
 
         # pre-transform img
         if self.pre_img_transform:
@@ -124,7 +128,7 @@ class CornellGraspingDataset(Dataset):
             if self.post_pcd_transform:
                 pcd = self.post_pcd_transform(pcd)
                 pcd = pcd[:1, :, :]
-                
+            
         # concatenate img and pcd
         if self.use_pcd:
             if self.concat_pcd:
@@ -134,6 +138,9 @@ class CornellGraspingDataset(Dataset):
                     img = torch.cat((img[:2, :, :], pcd), 0)
                 pcd = 0
 
+        if pcd is None:
+            pcd = 0
+                
         # calculate target
         # corners of bbox
         x1, y1 = bbox[0]
@@ -150,16 +157,23 @@ class CornellGraspingDataset(Dataset):
         box_w = np.sqrt((x1 - x4)**2 + (y1 - y4)**2)
 
         # orientation of bbox
-        theta = np.arctan((y2 - y1) / (x2 - x1))
+        if x2 == x1:
+            theta = np.pi / 2
+        else:
+            theta = np.arctan((y2 - y1) / (x2 - x1))
+#             theta = np.arctan2(y2 - y1, x2 - x1)
 
         if self.grasp_config == 3:
             target = np.array([x, y, theta])
+        if self.grasp_config == 4:
+            target = np.array([x/224, y/224, box_w/224, box_h/224])
         elif self.grasp_config == 5:
-            target = np.array([x, y, box_h, box_w, theta])
+            target = np.array([x/224, y/224, box_w/224, box_h/224, theta])
         else:
             target = np.array([x, y, box_h, box_w, np.cos(2*theta), np.sin(2*theta)])
 
         if self.target_transform:
             target = self.target_transform(target)
             
-        return img, target, bbox, pcd
+        im_idx = index
+        return img, target, bbox, pcd #, im_idx, grasp_idx, img_name
