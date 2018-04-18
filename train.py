@@ -224,109 +224,113 @@ def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
 def main():
 
     args = parser.parse_args()
-    fold = 0
-    # for fold in range(args.num_folds):
-    # create dataset
-
-    train_data = CornellGraspingDataset(
-    csv_file=args.csv_dir, 
-    data_dir=args.data_dir,
-    fold=fold,
-    split='train',
-    split_type='image',
-    use_pcd=False,
-    concat_pcd=False,
-    pre_img_transform=None,
-    pre_pcd_transform=None,
-    co_transform=train_co_transform,
-    post_img_transform=post_img_transform,
-    post_pcd_transform=None,
-    target_transform=target_transform,
-    grasp_config=args.grasp_config,)
-
-
-    train_loader = DataLoader(train_data,
-                      batch_size=32,
-                      shuffle=True,
-                      num_workers=4,
-                      pin_memory=True)
-
-
-    val_data = CornellGraspingDataset(
+    performance = []
+    for fold in range(args.num_folds):
+        # create dataset
+        train_data = CornellGraspingDataset(
         csv_file=args.csv_dir, 
         data_dir=args.data_dir,
         fold=fold,
-        split='val',
+        split='train',
         split_type='image',
         use_pcd=False,
         concat_pcd=False,
         pre_img_transform=None,
         pre_pcd_transform=None,
-        co_transform=val_co_transform,
+        co_transform=train_co_transform,
         post_img_transform=post_img_transform,
         post_pcd_transform=None,
         target_transform=target_transform,
         grasp_config=args.grasp_config,)
 
 
-    val_loader = DataLoader(val_data,
-                      batch_size=32,
-                      shuffle=False,
-                      num_workers=4,
-                      pin_memory=True)
+        train_loader = DataLoader(train_data,
+                          batch_size=32,
+                          shuffle=True,
+                          num_workers=4,
+                          pin_memory=True)
 
-    #Load model
-    model = torchvision.models.alexnet(pretrained=True)
 
-    # If only training the last two layers
-    if not args.train_all:
-        for param in model.parameters():
-            param.requires_grad = False
+        val_data = CornellGraspingDataset(
+            csv_file=args.csv_dir, 
+            data_dir=args.data_dir,
+            fold=fold,
+            split='val',
+            split_type='image',
+            use_pcd=False,
+            concat_pcd=False,
+            pre_img_transform=None,
+            pre_pcd_transform=None,
+            co_transform=val_co_transform,
+            post_img_transform=post_img_transform,
+            post_pcd_transform=None,
+            target_transform=target_transform,
+            grasp_config=args.grasp_config,)
 
-    # Replace last two linear layers
-    model.classifier._modules['4'] = nn.Linear(4096, 512)
-    model.classifier._modules['6'] = nn.Linear(512, args.grasp_config)
-    model.cuda()
 
-    # Loss, optimizer, lr_scheduler
-    criterion = nn.MSELoss().cuda()
-    optimizer = optim.SGD(model.parameters(),
-                          lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
-    scheduler = lr_scheduler.StepLR(optimizer, step_size=700, gamma=0.1)
+        val_loader = DataLoader(val_data,
+                          batch_size=32,
+                          shuffle=False,
+                          num_workers=4,
+                          pin_memory=True)
 
-    epoch_time = AverageMeter()
-    train_loss = AverageMeter()
-    train_acc = AverageMeter()
-    val_loss = AverageMeter()
-    val_acc = AverageMeter()
-    
-    start = time.time()
-    for epoch in range(args.start_epoch, args.epochs):
-        end = time.time()        
-        # one training step
-        t_loss, t_acc = train(train_loader, model, criterion, optimizer, epoch)
+        #Load model
+        model = torchvision.models.alexnet(pretrained=True)
+
+        # If only training the last two layers
+        if not args.train_all:
+            for param in model.parameters():
+                param.requires_grad = False
+
+        # Replace last two linear layers
+        model.classifier._modules['4'] = nn.Linear(4096, 512)
+        model.classifier._modules['6'] = nn.Linear(512, args.grasp_config)
+        model.cuda()
+
+        # Loss, optimizer, lr_scheduler
+        criterion = nn.MSELoss().cuda()
+        optimizer = optim.SGD(model.parameters(),
+                              lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
+        scheduler = lr_scheduler.StepLR(optimizer, step_size=700, gamma=0.1)
+
+        epoch_time = AverageMeter()
+        train_loss = AverageMeter()
+        train_acc = AverageMeter()
+        val_loss = AverageMeter()
+        val_acc = AverageMeter()
         
-        # one validation step
-        v_loss, v_acc = validate(val_loader, model, criterion)
+        start = time.time()
+        for epoch in range(args.start_epoch, args.epochs):
+            end = time.time()        
+            # one training step
+            t_loss, t_acc = train(train_loader, model, criterion, optimizer, epoch)
+            
+            # one validation step
+            v_loss, v_acc = validate(val_loader, model, criterion)
 
-        # update loss, accuracy, and epoch time
-        epoch_time.update(time.time() - end)
-        train_loss.update(t_loss, 1)
-        train_acc.update(t_acc, 1)
-        val_loss.update(v_loss, 1)
-        val_acc.update(v_acc, 1)
+            # update loss, accuracy, and epoch time
+            epoch_time.update(time.time() - end)
+            train_loss.update(t_loss, 1)
+            train_acc.update(t_acc, 1)
+            val_loss.update(v_loss, 1)
+            val_acc.update(v_acc, 1)
 
-        print('Epoch: {0}/{1}\t'
-              'Time {time.val:.3f} ({time.avg:.3f})\t'
-              'Train Loss {t_loss.val:.4f} ({t_loss.avg:.4f})\t'
-              'Train Acc {t_acc.val:.3f} ({t_acc.avg:.3f})\t'
-              'Val Loss {v_loss.val:.4f} ({v_loss.avg:.4f})\t'
-              'Val Acc {v_acc.val:.3f} ({v_acc.avg:.3f})'.format(
-                                                                 epoch+1, args.epochs-args.start_epoch, time=epoch_time,
-                                                                 t_loss=train_loss, t_acc=train_acc,
-                                                                 v_loss=val_loss, v_acc=val_acc))
+            print('Epoch: {0}/{1}\t'
+                  'Time {time.val:.3f} ({time.avg:.3f})\t'
+                  'Train Loss {t_loss.val:.4f} ({t_loss.avg:.4f})\t'
+                  'Train Acc {t_acc.val:.3f} ({t_acc.avg:.3f})\t'
+                  'Val Loss {v_loss.val:.4f} ({v_loss.avg:.4f})\t'
+                  'Val Acc {v_acc.val:.3f} ({v_acc.avg:.3f})'.format(
+                                                                     epoch+1, args.epochs-args.start_epoch, time=epoch_time,
+                                                                     t_loss=train_loss, t_acc=train_acc,
+                                                                     v_loss=val_loss, v_acc=val_acc))
 
-    print("Training time: {}".format(time.time() - start))
+        performance.append({'train_loss': train_loss.avg, 
+                           'train_acc': train_acc.avg,
+                           'val_loss': val_loss.avg,
+                           'val_acc': val_acc.avg,})
+        
+        print("Training time for fold {}: {}".format(fold, time.time() - start))
 
 
 if __name__ == '__main__':
