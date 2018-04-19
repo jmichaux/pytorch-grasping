@@ -28,6 +28,7 @@ from datasets import *
 from intersection import *
 from transforms import *
 from tensorboardX import SummaryWriter
+from utils import *
 
 
 parser = argparse.ArgumentParser(description="Pytorch grasp detection")
@@ -234,6 +235,8 @@ def main():
     global args
     args = parser.parse_args()
     performance = []
+    job_id = get_job_id()
+
     for fold in range(args.num_folds):
         # create dataset
         train_data = CornellGraspingDataset(
@@ -303,7 +306,7 @@ def main():
         scheduler = lr_scheduler.StepLR(optimizer, step_size=700, gamma=0.1)
 
         # track loss and accuracy
-        writer = SummaryWriter('runs')
+        writer = SummaryWriter('runs/{}'.format(fold))
         epoch_time = AverageMeter()
         train_loss = AverageMeter()
         train_acc = AverageMeter()
@@ -313,7 +316,12 @@ def main():
         
         start = time.time()
         for epoch in range(args.start_epoch, args.epochs):
+            # check there is enough time
+            if not enough_time(job_id, epoch_time.avg):
+                exit()
+            
             end = time.time()        
+            
             # adjust learning rate
             lr = adjust_learning_rate(optimizer, epoch, 1000)
 
@@ -353,15 +361,15 @@ def main():
                                                                      v_loss=val_loss, v_acc=val_acc))
 
             
-            writer.add_scalar('data/{}/train_loss_val'.format('fold'), train_loss.val, epoch)
-            writer.add_scalar('data/{}/train_loss_avg'.format('fold'), train_loss.avg, epoch)
-            writer.add_scalar('data/{}/val_loss_val'.format('fold'), val_loss.val, epoch)
-            writer.add_scalar('data/{}/val_loss_avg'.format('fold'), val_loss.avg, epoch)
-            writer.add_scalar('data/{}/train_acc_val'.format('fold'), train_acc.val, epoch)
-            writer.add_scalar('data/{}/train_acc_avg'.format('fold'), train_acc.avg, epoch)
-            writer.add_scalar('data/{}/val_acc_val'.format('fold'), val_acc.val, epoch)
-            writer.add_scalar('data/{}/val_acc_avg'.format('fold'), val_acc.avg, epoch)
-            writer.add_scalar('data/{}/lr'.format('fold'), lr, epoch)
+            writer.add_scalar('data/train_loss_val', train_loss.val, epoch)
+            writer.add_scalar('data/train_loss_avg', train_loss.avg, epoch)
+            writer.add_scalar('data/val_loss_val', val_loss.val, epoch)
+            writer.add_scalar('data/val_loss_avg', val_loss.avg, epoch)
+            writer.add_scalar('data/train_acc_val', train_acc.val, epoch)
+            writer.add_scalar('data/train_acc_avg', train_acc.avg, epoch)
+            writer.add_scalar('data/val_acc_val', val_acc.val, epoch)
+            writer.add_scalar('data/val_acc_avg', val_acc.avg, epoch)
+            writer.add_scalar('data/lr', lr, epoch)
 
             epoch_time.update(time.time() - end)
 
