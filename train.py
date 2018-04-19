@@ -4,10 +4,11 @@ import random
 from os.path import basename, dirname, join
 import glob
 import numbers
-import numpy as np
-import pandas as pd
+import shutil
 import time
 
+import numpy as np
+import pandas as pd
 from PIL import Image
 import matplotlib.pyplot as plt
 from scipy.misc import bytescale
@@ -26,6 +27,7 @@ from torchvision.transforms import functional as f
 from datasets import *
 from intersection import *
 from transforms import *
+from tensorboardX import SummaryWriter
 
 
 parser = argparse.ArgumentParser(description="Pytorch grasp detection")
@@ -61,16 +63,17 @@ parser.add_argument('--train-all', dest='train_all', action='store_false',
                     help='make entire network trainable')
 parser.add_argument('--grasp-config', default=5, type=int,
                     help='parameterizaton length of grasps')
+#TODO: change this argument to something more descriptive 
+parser.add_argument('--save-step', default=500, type=int,
+                    help='save model every "save_step number of epochs (default: 500)')
 parser.add_argument('--num-folds', default=5, type=int,
                     help='number of cross-validation folds')
-# parser.add_argument('--verbose', '-v', dest='verbose', action='store_true',
-#                     help='print during training')
+
 
 
 ######################
 #   Data Transforms  #
 ######################
-
 # pre transforms
 pre_img_transform = t.Compose([
     t.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4),
@@ -95,7 +98,7 @@ target_transform = t.Compose([
     TargetTensor(),
 ])
 
-# co_transforms
+# train co-transforms
 train_co_transform = Compose([
     RandomRotation(40),
     RandomTranslation(50),
@@ -190,9 +193,7 @@ def train(train_loader, model, criterion, optimizer, epoch):
     return losses.avg, acc.avg
 
 
-
 def validate(val_loader, model, criterion):
-    batch_time = AverageMeter()
     losses = AverageMeter()
     acc = AverageMeter()
 
@@ -216,13 +217,21 @@ def validate(val_loader, model, criterion):
     return losses.avg, acc.avg
 
 
-def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
+def save_checkpoint(state, is_best, epoch, save_step, filename='checkpoint.pth.tar'):
     torch.save(state, filename)
-    if is_best:
+    if is_best and epoch % save_step == 0:
         shutil.copyfile(filename, 'model_best.pth.tar')
 
-def main():
 
+def adjust_learning_rate(optimizer, epoch, step):
+    """Sets the learning rate to the initial LR decayed by 10 every step epochs"""
+    lr = args.lr * (0.1 ** (epoch // step))
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = lr
+    return lr
+
+def main():
+    global args
     args = parser.parse_args()
     performance = []
     for fold in range(args.num_folds):
@@ -293,15 +302,21 @@ def main():
                               lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
         scheduler = lr_scheduler.StepLR(optimizer, step_size=700, gamma=0.1)
 
+        # track loss and accuracy
+        writer = SummaryWriter('runs')
         epoch_time = AverageMeter()
         train_loss = AverageMeter()
         train_acc = AverageMeter()
         val_loss = AverageMeter()
         val_acc = AverageMeter()
+        best_acc = 0
         
         start = time.time()
         for epoch in range(args.start_epoch, args.epochs):
             end = time.time()        
+            # adjust learning rate
+            lr = adjust_learning_rate(optimizer, epoch, 1000)
+
             # one training step
             t_loss, t_acc = train(train_loader, model, criterion, optimizer, epoch)
             
@@ -309,28 +324,54 @@ def main():
             v_loss, v_acc = validate(val_loader, model, criterion)
 
             # update loss, accuracy, and epoch time
-            epoch_time.update(time.time() - end)
             train_loss.update(t_loss, 1)
             train_acc.update(t_acc, 1)
             val_loss.update(v_loss, 1)
             val_acc.update(v_acc, 1)
 
+            is_best =  v_acc > best_acc
+            best_acc = max(v_acc, best_acc)
+            
+            save_checkpoint({
+                            'epoch': epoch + 1,
+                            'state_dict': model.state_dict(),
+                            'best_acc': best_acc,
+                            'optimizer': optimizer.state_dict()
+                            }, is_best, epoch, args.save_step)
+
             print('Epoch: {0}/{1}\t'
                   'Time {time.val:.3f} ({time.avg:.3f})\t'
+                  'LR {lr:.4f}\t'
                   'Train Loss {t_loss.val:.4f} ({t_loss.avg:.4f})\t'
                   'Train Acc {t_acc.val:.3f} ({t_acc.avg:.3f})\t'
                   'Val Loss {v_loss.val:.4f} ({v_loss.avg:.4f})\t'
                   'Val Acc {v_acc.val:.3f} ({v_acc.avg:.3f})'.format(
-                                                                     epoch+1, args.epochs-args.start_epoch, time=epoch_time,
+                                                                     epoch+1, args.epochs-args.start_epoch, 
+                                                                     time=epoch_time,
+                                                                     lr=lr,
                                                                      t_loss=train_loss, t_acc=train_acc,
                                                                      v_loss=val_loss, v_acc=val_acc))
+
+            
+            writer.add_scalar('data/{}/train_loss_val'.format('fold'), train_loss.val, epoch)
+            writer.add_scalar('data/{}/train_loss_avg'.format('fold'), train_loss.avg, epoch)
+            writer.add_scalar('data/{}/val_loss_val'.format('fold'), val_loss.val, epoch)
+            writer.add_scalar('data/{}/val_loss_avg'.format('fold'), val_loss.avg, epoch)
+            writer.add_scalar('data/{}/train_acc_val'.format('fold'), train_acc.val, epoch)
+            writer.add_scalar('data/{}/train_acc_avg'.format('fold'), train_acc.avg, epoch)
+            writer.add_scalar('data/{}/val_acc_val'.format('fold'), val_acc.val, epoch)
+            writer.add_scalar('data/{}/val_acc_avg'.format('fold'), val_acc.avg, epoch)
+            writer.add_scalar('data/{}/lr'.format('fold'), lr, epoch)
+
+            epoch_time.update(time.time() - end)
 
         performance.append({'train_loss': train_loss.avg, 
                            'train_acc': train_acc.avg,
                            'val_loss': val_loss.avg,
                            'val_acc': val_acc.avg,})
-        
+
         print("Training time for fold {}: {}".format(fold, time.time() - start))
+        print(performance)
 
 
 if __name__ == '__main__':
